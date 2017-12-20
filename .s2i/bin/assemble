@@ -1,12 +1,17 @@
 #!/bin/sh
 
 SRCCONF=/tmp/src/configuration
+SRCCONFT=/tmp/src/conf
 SRCLIB=/tmp/src/lib
 SRCBIN=/tmp/src
 SRCPATCH=/tmp/src/patch
 
 if [ -d ${SRCCONF} ]; then
   echo "Copying config files from project..."
-  cp -v ${SRCCONF}/openshift-activemq.xml  $AMQ_HOME/conf/
-  cp -v ${SRCCONF}/${environment}-login.config $AMQ_HOME/conf/openshift-login.config
+  cp -v ${SRCCONFT}/${environment}-login.config $AMQ_HOME/conf/openshift-login.config
 fi
+if [ -d ${SRCLIB} ]; then
+  echo "Copying config files from project..."
+  cp -v ${SRCLIB}/*  $AMQ_HOME/lib 
+fi
+/usr/local/s2i/assemble

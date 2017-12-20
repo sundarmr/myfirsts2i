@@ -1,0 +1,333 @@
+<!--
+    Licensed to the Apache Software Foundation (ASF) under one or more
+    contributor license agreements.  See the NOTICE file distributed with
+    this work for additional information regarding copyright ownership.
+    The ASF licenses this file to You under the Apache License, Version 2.0
+    (the "License"); you may not use this file except in compliance with
+    the License.  You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+-->
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+           http://activemq.apache.org/schema/core http://activemq.apache.org/schema/core/activemq-core.xsd">
+
+    <!-- Allows us to use system properties as variables in this configuration file -->
+    <bean class="org.springframework.beans.factory.config.PropertyPlaceholderConfigurer">
+        <property name="locations">
+            <list>
+                <value>file:${activemq.conf}/credentials.properties</value>
+                <value>file:${activemq.conf}/p66.properties</value>
+            </list>
+        </property>
+    </bean>
+
+   	<!-- Allows accessing the server log -->
+    <bean id="logQuery" class="io.fabric8.insight.log.log4j.Log4jLogQuery"
+          lazy-init="false" scope="singleton"
+          init-method="start" destroy-method="stop">
+    </bean>
+
+    <!--
+        The <broker> element is used to configure the ActiveMQ broker.
+    -->
+    <broker xmlns="http://activemq.apache.org/schema/core" brokerName="${HOSTNAME}" dataDirectory="${activemq.data}">
+
+        <!-- ##### DESTINATIONS ##### -->
+
+        <destinationPolicy>
+            <policyMap>
+                <policyEntries>
+                    <policyEntry queue=">" producerFlowControl="true" advisoryForSlowConsumers="true" gcInactiveDestinations="true" inactiveTimoutBeforeGC="2592000000"
+                	expireMessagesPeriod="2592000000" memoryLimit="128mb">
+                	    <pendingMessageLimitStrategy>
+                    	    <constantPendingMessageLimitStrategy limit="1000000"/>
+                  	    </pendingMessageLimitStrategy>
+                  	    <networkBridgeFilterFactory>
+						    <conditionalNetworkBridgeFilterFactory replayWhenNoConsumers="true"/>
+					    </networkBridgeFilterFactory>
+                    </policyEntry>
+                    <!--policyEntry queue=">" producerFlowControl="true" memoryLimit="1mb" maxBrowsePageSize="700"-->
+                        <!--
+                            Allow messages to be replayed back to original broker if there is demand.
+                            (replayWhenNoConsumers="true").
+                            Due to ENTMQ-444 you also want to configure a replayDelay that is high enough so that
+                            any outstanding message acks are passed along the network bridge *before* we start
+                            to replay messages (replayDelay="500"). The value of replayDelay is a bit of a guess but
+                            on a decently fast network 500 msecs should be enough to pass on and process all message acks.
+              
+                            Note: JMS clients that use the failover transport to connect to a broker in the mesh
+                            arbitrarily should consider using an initialReconnectDelay on the failover url that is
+                            higher than replayDelay configured in the broker. E.g.
+                            "failover:(tcp://brokerA:61616,tcp://brokerB:61616)?randomize=true&initialReconnectDelay=700"
+                            This ensures that the demand subscription for this reconnecting consumer is only created
+                            after replayDelay has elapsed.
+                            If its created before, it may lead to the remote broker skipping message dispatch
+                            to the remote broker and those message would seem to be stuck on the broker despite a consumer
+                            being connected via a networked broker.
+                            See ENTMQ-538 for more details.
+                        -->
+                        <!--networkBridgeFilterFactory>
+                            <conditionalNetworkBridgeFilterFactory replayWhenNoConsumers="true" replayDelay="500" />
+                        </networkBridgeFilterFactory>
+                    </policyEntry-->
+                    <!--policyEntry topic=">" producerFlowControl="true"-->
+                        <!--
+                            The constantPendingMessageLimitStrategy is used to prevent
+                            slow topic consumers to block producers and affect other consumers
+                            by limiting the number of messages that are retained
+                            For more information, see:
+
+                            http://activemq.apache.org/slow-consumer-handling.html
+                        -->
+                        <!--pendingMessageLimitStrategy>
+                            <constantPendingMessageLimitStrategy limit="1000" />
+                        </pendingMessageLimitStrategy>
+                    </policyEntry-->
+                    <policyEntry topic=">" producerFlowControl="true" advisoryForSlowConsumers="true" gcInactiveDestinations="true" inactiveTimoutBeforeGC="2592000000"
+                	expireMessagesPeriod="2592000000" memoryLimit="128mb">
+                        <pendingMessageLimitStrategy>
+                            <constantPendingMessageLimitStrategy limit="1000000"/>
+                        </pendingMessageLimitStrategy>
+                    </policyEntry>
+
+                    <!-- Configures the MediaDriver tracing solution queue -->
+            	    <policyEntry queue="MD.>" producerFlowControl="true" advisoryForSlowConsumers="true" gcInactiveDestinations="true" inactiveTimoutBeforeGC="2592000000" expireMessagesPeriod="2592000000" memoryLimit="128mb">
+
+          			    <deadLetterStrategy>
+            			    <!--Use the prefix 'DLQ.' for the destination name, and make the DLQ a queue rather than a topic-->
+            			    <individualDeadLetterStrategy queuePrefix="DLQ." useQueueForQueueMessages="true"/>
+          			    </deadLetterStrategy>
+        		    </policyEntry>
+
+				    <!-- We will discard messages in vSubs after 14 days if they have not been consumed. We will delete vSub queues after 14 days if they have not had a client connected. -->
+				    <policyEntry queue="vSub.>" producerFlowControl="true" advisoryForSlowConsumers="true" gcInactiveDestinations="true" inactiveTimoutBeforeGC="1209600000"
+							   expireMessagesPeriod="1209600000" memoryLimit="128mb">
+					    <pendingMessageLimitStrategy>
+						    <constantPendingMessageLimitStrategy limit="1000000"/>
+					    </pendingMessageLimitStrategy>
+					    <networkBridgeFilterFactory>
+						    <conditionalNetworkBridgeFilterFactory replayWhenNoConsumers="true"/>
+					    </networkBridgeFilterFactory>
+				    </policyEntry>
+                </policyEntries>
+            </policyMap>
+        </destinationPolicy>
+
+        <!--
+            The managementContext is used to configure how ActiveMQ is exposed in
+            JMX. By default, ActiveMQ uses the MBean server that is started by
+            the JVM. For more information, see:
+
+            http://activemq.apache.org/jmx.html
+        -->
+        <managementContext>
+            <managementContext createConnector="false" />
+        </managementContext>
+
+        <networkConnectors>
+            <!--
+                In a full mesh we want messages to travel freely to any broker
+                (i.e. messageTTL="-1") but create demand subscription only to the next connected
+                broker (i.e. consumerTTL="1"). See AMQ-4607.
+            -->
+            <!-- ##### MESH_CONFIG ##### -->
+        </networkConnectors>
+
+        <!--
+            Configure message persistence for the broker. The default persistence
+            mechanism is the KahaDB store (identified by the kahaDB tag).
+            For more information, see:
+
+            http://activemq.apache.org/persistence.html
+        -->
+        <persistenceAdapter>
+            <kahaDB directory="${activemq.data}/kahadb" />
+        </persistenceAdapter>
+
+        <plugins>
+            <jaasAuthenticationPlugin configuration="ldapConfiguration" />
+             <authorizationPlugin>
+		       <map>
+		         <authorizationMap groupClass="org.apache.activemq.jaas.GroupPrincipal">
+		           <authorizationEntries>
+
+		           	 <!-- Global Authorizations -->
+		           	 <authorizationEntry queue=">" read="admin" write="admin" admin="admin"/>
+		           	 <authorizationEntry topic=">" read="admin" write="admin" admin="admin"/>
+		             <!-- P66 QUEUE based Authorizations -->
+		             <!-- Commerical Right Angle Authorizations -->
+		             <authorizationEntry queue="COMMERCIAL.RA.ARBALANCES.>" read="admin,${HST-AMQ-COMMERCIAL-RA}" write="admin,${BRT-AMQ-EAI-SAPPI}," admin="admin,${BRT-AMQ-EAI-SAPPI},${HST-AMQ-COMMERCIAL-RA}"/>
+		             <authorizationEntry queue="COMMERCIAL.RA.FREIGHT.>" read="admin,${HST-AMQ-COMMERCIAL-RA}" write="admin,${BRT-AMQ-EAI-INFORMATICA}" admin="admin,${HST-AMQ-COMMERCIAL-RA},${BRT-AMQ-EAI-INFORMATICA}"/>
+		             <authorizationEntry queue="COMMERCIAL.RA.LEASEMASTER.>" read="admin,${HST-AMQ-COMMERCIAL-RA}" write="admin,${BRT-AMQ-EAI-INFORMATICA}" admin="admin,${HST-AMQ-COMMERCIAL-RA},${BRT-AMQ-EAI-INFORMATICA}"/>
+		             <authorizationEntry queue="COMMERCIAL.RA.LEASETICKET.>" read="admin,${HST-AMQ-COMMERCIAL-RA}" write="admin,${BRT-AMQ-EAI-INFORMATICA}" admin="admin,${BRT-AMQ-EAI-INFORMATICA},${HST-AMQ-COMMERCIAL-RA}"/>
+		             <authorizationEntry queue="COMMERCIAL.RA.LEASETICKETTRUCKGL.>"  read="admin,${HST-AMQ-COMMERCIAL-RA}" write="admin,${BRT-AMQ-EAI-INFORMATICA}" admin="admin,${BRT-AMQ-EAI-INFORMATICA},${HST-AMQ-COMMERCIAL-RA}"/>
+		             <authorizationEntry queue="COMMERCIAL.RA.MTMREPORT.>" read="admin,${HST-AMQ-COMMERCIAL-CDW},${HST-AMQ-COMMERCIAL-RA}" write="admin,${HST-AMQ-COMMERCIAL-RA}" admin="admin,${HST-AMQ-COMMERCIAL-CDW},${HST-AMQ-COMMERCIAL-RA}"/>
+		             <authorizationEntry queue="COMMERCIAL.RA.MTMREPORTRESPONSE.>" read="admin,${HST-AMQ-COMMERCIAL-RA}" write="admin,${HST-AMQ-COMMERCIAL-CDW}" admin="admin,${HST-AMQ-COMMERCIAL-CDW},${HST-AMQ-COMMERCIAL-RA}"/>
+		             <authorizationEntry queue="COMMERCIAL.RA.TRANSACTIONVERIFICATION.>" read="admin,${HST-AMQ-COMMERCIAL-RA}" write="admin,${BRT-AMQ-EAI-INFORMATICA}" admin="admin,${BRT-AMQ-EAI-INFORMATICA},${HST-AMQ-COMMERCIAL-RA}"/>
+		             <authorizationEntry queue="COMMERCIAL.RA.TRIALBALANCE.>" read="admin,${HST-AMQ-COMMERCIAL-RA}" write="admin,${BRT-AMQ-EAI-INFORMATICA}" admin="admin,${HST-AMQ-COMMERCIAL-RA},${BRT-AMQ-EAI-INFORMATICA}"/>
+		             <authorizationEntry queue="COMMERCIAL.RA.CONTRACTVERIFICATION.>" read="admin,${BRT-AMQ-EAI-SAPPI},${HST-AMQ-COMMERCIAL-RA}" write="admin,${HST-AMQ-COMMERCIAL-RA}" admin="admin,${HST-AMQ-COMMERCIAL-RA},${BRT-AMQ-EAI-SAPPI}"/>
+		             <authorizationEntry queue="COMMERCIAL.RA.CONTRACTVERIFICATIONRESPONSE.>" read="admin,${HST-AMQ-COMMERCIAL-RA}" write="admin,${BRT-AMQ-EAI-SAPPI}" admin="admin,${BRT-AMQ-EAI-SAPPI},${HST-AMQ-COMMERCIAL-RA}"/>
+		             <authorizationEntry queue="COMMERCIAL.RA.FICO.>" read="admin,${BRT-AMQ-EAI-SAPPI},${HST-AMQ-COMMERCIAL-RA}" write="admin,${HST-AMQ-COMMERCIAL-RA}" admin="admin,${HST-AMQ-COMMERCIAL-RA},${BRT-AMQ-EAI-SAPPI}"/>
+		             <authorizationEntry queue="COMMERCIAL.RA.FICOREPLY.>" read="admin,${HST-AMQ-COMMERCIAL-RA}" write="admin,${BRT-AMQ-EAI-SAPPI}" admin="admin,${BRT-AMQ-EAI-SAPPI},${HST-AMQ-COMMERCIAL-RA}"/>
+		             <authorizationEntry queue="COMMERCIAL.RA.MOVEMENT.>" read="admin,${HST-AMQ-COMMERCIAL-RA}" write="admin,${BRT-AMQ-EAI-SAPPI}" admin="admin,${BRT-AMQ-EAI-SAPPI},${HST-AMQ-COMMERCIAL-RA}"/>
+		             <authorizationEntry queue="COMMERCIAL.RA.MOVEMENTRESPONSE.>" read="admin,${BRT-AMQ-EAI-SAPPI},${HST-AMQ-COMMERCIAL-RA}" write="admin,${HST-AMQ-COMMERCIAL-RA}" admin="admin,${HST-AMQ-COMMERCIAL-RA},${BRT-AMQ-EAI-SAPPI}"/>
+		             <authorizationEntry queue="COMMERCIAL.RA.MSDS.>" read="admin,${BRT-AMQ-EAI-INFORMATICA},${HST-AMQ-COMMERCIAL-RA}" write="admin,${HST-AMQ-COMMERCIAL-RA}" admin="admin,${HST-AMQ-COMMERCIAL-RA},${BRT-AMQ-EAI-INFORMATICA}"/>
+		             <authorizationEntry queue="COMMERCIAL.RA.PRICEORDERS.>" read="admin,${BRT-AMQ-EAI-SAPPI},${HST-AMQ-COMMERCIAL-RA}" write="admin,${HST-AMQ-COMMERCIAL-RA}" admin="admin,${BRT-AMQ-EAI-SAPPI},${HST-AMQ-COMMERCIAL-RA}"/>
+		             <authorizationEntry queue="COMMERCIAL.RA.PRICEORDERSRESPONSE.>" read="admin,${HST-AMQ-COMMERCIAL-RA}" write="admin,${BRT-AMQ-EAI-SAPPI}" admin="admin,${HST-AMQ-COMMERCIAL-RA},${BRT-AMQ-EAI-SAPPI}"/>
+		             <authorizationEntry queue="COMMERCIAL.RA.RATEREQUEST.>" read="admin,${BRT-AMQ-EAI-SAPPI},${HST-AMQ-COMMERCIAL-RA}" write="admin,${HST-AMQ-COMMERCIAL-RA}" admin="admin,${HST-AMQ-COMMERCIAL-RA},${BRT-AMQ-EAI-SAPPI}"/>
+		             <authorizationEntry queue="COMMERCIAL.RA.RATERESPONSE.>" read="admin,${HST-AMQ-COMMERCIAL-RA}" write="admin,${BRT-AMQ-EAI-SAPPI}" admin="admin,${BRT-AMQ-EAI-SAPPI},${HST-AMQ-COMMERCIAL-RA}"/>
+		             <authorizationEntry queue="COMMERCIAL.RA.TAXDETERMINATION.>" read="admin,${BRT-AMQ-EAI-SAPPI},${HST-AMQ-COMMERCIAL-RA}" write="admin,${HST-AMQ-COMMERCIAL-RA}" admin="admin,${BRT-AMQ-EAI-SAPPI},${HST-AMQ-COMMERCIAL-RA}"/>
+		             <authorizationEntry queue="COMMERCIAL.RA.TAXDETERMINATIONRESPONSE.>" read="admin,${HST-AMQ-COMMERCIAL-RA}" write="admin,${BRT-AMQ-EAI-SAPPI}" admin="admin,${BRT-AMQ-EAI-SAPPI},${HST-AMQ-COMMERCIAL-RA}"/>
+		             <authorizationEntry queue="COMMERCIAL.RA.MASTERDATA.>" read="admin,${HST-AMQ-COMMERCIAL-RA}" write="admin,${BRT-AMQ-EAI-SAPPI}" admin="admin,${BRT-AMQ-EAI-SAPPI},${HST-AMQ-COMMERCIAL-RA}"/>
+
+		             <!-- Commerical Pricing Authorizations -->
+		             <authorizationEntry queue="COMMERCIAL.PRICING.PFMS.ALIGNE.>" read="admin,${HST-AMQ-COMMERCIAL-ALIGNE}" write="admin,${BRT-AMQ-EAI-CAMEL}" admin="admin,${BRT-AMQ-EAI-CAMEL},${HST-AMQ-COMMERCIAL-ALIGNE}"/>
+		             <authorizationEntry queue="COMMERCIAL.PRICING.PFMS.COMPASS.>" read="admin,${BRT-AMQ-EAI-SAPPI}" write="admin,${BRT-AMQ-EAI-CAMEL}" admin="admin,${BRT-AMQ-EAI-CAMEL},${BRT-AMQ-EAI-SAPPI}"/>
+		             <authorizationEntry queue="COMMERCIAL.PRICING.PFMS.NETBACKS.>" read="admin,${BRT-AMQ-EAI-SAPPI}" write="admin,${BRT-AMQ-EAI-CAMEL}" admin="admin,${BRT-AMQ-EAI-CAMEL},${BRT-AMQ-EAI-SAPPI}"/>
+		             <authorizationEntry queue="COMMERCIAL.PRICING.PFMS.RA.>" read="admin,${HST-AMQ-COMMERCIAL-RA}" write="admin,${BRT-AMQ-EAI-CAMEL}" admin="admin,${BRT-AMQ-EAI-CAMEL},${HST-AMQ-COMMERCIAL-RA}"/>
+		             <authorizationEntry queue="COMMERCIAL.PRICING.PFMS.SAP.>" read="admin,${BRT-AMQ-EAI-SAPPI}" write="admin,${BRT-AMQ-EAI-CAMEL}" admin="admin,${BRT-AMQ-EAI-CAMEL},${BRT-AMQ-EAI-SAPPI}"/>
+		             <authorizationEntry queue="COMMERCIAL.PRICING.ALIGNE.FDBACK.>" read="admin,${HST-AMQ-COMMERCIAL-PFMS}" write="admin,${HST-AMQ-COMMERCIAL-ALIGNE}" admin="admin,${HST-AMQ-COMMERCIAL-ALIGNE},${HST-AMQ-COMMERCIAL-PFMS}"/>
+		             <authorizationEntry queue="COMMERCIAL.PRICING.FDBACK.>" read="admin,${HST-AMQ-COMMERCIAL-PFMS},${HST-AMQ-COMMERCIAL-RA}" write="admin,${HST-AMQ-COMMERCIAL-RA},${BRT-AMQ-EAI-SAPPI}" admin="admin,${HST-AMQ-COMMERCIAL-RA},${BRT-AMQ-EAI-SAPPI},${HST-AMQ-COMMERCIAL-PFMS}"/>
+		          	 <authorizationEntry queue="COMMERCIAL.PRICING.LIM.>" read="admin,${HST-AMQ-COMMERCIAL-PFMS}" write="admin,${HST-AMQ-COMMERCIAL-LIM}" admin="admin,${HST-AMQ-COMMERCIAL-LIM},${HST-AMQ-COMMERCIAL-PFMS}"/>
+		             <authorizationEntry queue="COMMERICIAL.PRICING.PFMS.DLQ.>" read="admin,${BRT-AMQ-EAI-CAMEL}" write="admin,${BRT-AMQ-EAI-CAMEL}" admin="admin,${BRT-AMQ-EAI-CAMEL}"/>
+		             <authorizationEntry queue="COMMERCIAL.PRICING.PFMS.PRIMARY.>" read="admin,${BRT-AMQ-EAI-CAMEL}" write="admin,${HST-AMQ-COMMERCIAL-PFMS}" admin="admin,${HST-AMQ-COMMERCIAL-PFMS},${BRT-AMQ-EAI-CAMEL}"/>
+
+		             <!-- Commerical IMOS Authorizations -->
+		             <authorizationEntry queue="COMMERCIAL.IMOS.VENDORCREDIT.REQUEST.>" read="admin,${BRT-AMQ-EAI-SAPPI}" write="admin,${BRT-AMQ-COMMERCIAL-IMOS-VENDORCREDITREQUEST}" admin="admin,${BRT-AMQ-EAI-SAPPI},${BRT-AMQ-COMMERCIAL-IMOS-VENDORCREDITREQUEST}"/>
+		             <authorizationEntry queue="COMMERCIAL.IMOS.VENDORCREDIT.RESPONSE.>" read="admin,${BRT-AMQ-COMMERCIAL-IMOS-VENDORCREDITRESPONSE}" write="admin,${BRT-AMQ-EAI-SAPPI}" admin="admin,${BRT-AMQ-EAI-SAPPI},${BRT-AMQ-COMMERCIAL-IMOS-VENDORCREDITRESPONSE}"/>
+		             <authorizationEntry queue="COMMERCIAL.MARR.VESSELXREF.>" read="admin,${BRT-AMQ-COMMERCIAL-IMOS-MARR}" write="admin,${BRT-AMQ-COMMERCIAL-MARR}" admin="admin,${BRT-AMQ-COMMERCIAL-MARR},${BRT-AMQ-COMMERCIAL-IMOS-MARR}"/>
+
+		           	 <!-- Marketing Authorizations -->
+		             <authorizationEntry queue="MARKETING.US.SALESFORCE.OUTBOUNDMESSAGE.>" read="admin,${BRT-AMQ-EAI-CAMEL}" write="admin,${BRT-AMQ-EAI-SI}" admin="admin,${BRT-AMQ-EAI-CAMEL},${BRT-AMQ-EAI-SI}"/>
+		             <authorizationEntry queue="MARKETING.US.SALESFORCE.ACCOUNT.>" read="admin,${BRT-AMQ-EAI-SAPPI}" write="admin,${BRT-AMQ-EAI-CAMEL}" admin="admin,${BRT-AMQ-EAI-CAMEL},${BRT-AMQ-EAI-SAPPI}"/>
+		          	 <authorizationEntry queue="MARKETING.US.SALESFORCE.ACTVOLSUM.>" read="admin,${BRT-AMQ-EAI-SAPPI}" write="admin,${BRT-AMQ-EAI-CAMEL}" admin="admin,${BRT-AMQ-EAI-CAMEL},${BRT-AMQ-EAI-SAPPI}"/>
+		             <authorizationEntry queue="MARKETING.US.SALESFORCE.ADMCONTRVOLSUM.>" read="admin,${BRT-AMQ-EAI-SAPPI}" write="admin,${BRT-AMQ-EAI-CAMEL}" admin="admin,${BRT-AMQ-EAI-CAMEL},${BRT-AMQ-EAI-SAPPI}"/>
+		             <authorizationEntry queue="MARKETING.US.SALESFORCE.AGREEMENTSITE.>" read="admin,${BRT-AMQ-EAI-SAPPI}" write="admin,${BRT-AMQ-EAI-CAMEL}" admin="admin,${BRT-AMQ-EAI-CAMEL},${BRT-AMQ-EAI-SAPPI}"/>
+		             <authorizationEntry queue="MARKETING.US.SALESFORCE.AGREEMENT.>" read="admin,${BRT-AMQ-EAI-SAPPI}" write="admin,${BRT-AMQ-EAI-CAMEL}" admin="admin,${BRT-AMQ-EAI-CAMEL},${BRT-AMQ-EAI-SAPPI}"/>
+		             <authorizationEntry queue="MARKETING.US.SALESFORCE.CASE.>" read="admin,${BRT-AMQ-EAI-SAPPI}" write="admin,${BRT-AMQ-EAI-CAMEL}" admin="admin,${BRT-AMQ-EAI-CAMEL},${BRT-AMQ-EAI-SAPPI}"/>
+		             <authorizationEntry queue="MARKETING.US.SALESFORCE.CONTACT.>" read="admin,${BRT-AMQ-EAI-SAPPI}" write="admin,${BRT-AMQ-EAI-CAMEL}" admin="admin,${BRT-AMQ-EAI-CAMEL},${BRT-AMQ-EAI-SAPPI}"/>
+		             <authorizationEntry queue="MARKETING.US.SALESFORCE.CONTACTATTRIBUTE.>" read="admin,${BRT-AMQ-EAI-SAPPI}" write="admin,${BRT-AMQ-EAI-CAMEL}" admin="admin,${BRT-AMQ-EAI-CAMEL},${BRT-AMQ-EAI-SAPPI}"/>
+		             <authorizationEntry queue="MARKETING.US.SALESFORCE.EPOS2.>" read="admin,${BRT-AMQ-EAI-SAPPI}" write="admin,${BRT-AMQ-EAI-CAMEL}" admin="admin,${BRT-AMQ-EAI-CAMEL},${BRT-AMQ-EAI-SAPPI}"/>
+		             <authorizationEntry queue="MARKETING.US.SALESFORCE.OUTBOUNDMESSAGE.>" read="admin,${BRT-AMQ-EAI-SAPPI}" write="admin,${BRT-AMQ-EAI-CAMEL}" admin="admin,${BRT-AMQ-EAI-CAMEL},${BRT-AMQ-EAI-SAPPI}"/>
+		             <authorizationEntry queue="MARKETING.US.SALESFORCE.PDLEXTRACTOR.>" read="admin,${BRT-AMQ-EAI-SAPPI}" write="admin,${BRT-AMQ-EAI-CAMEL}" admin="admin,${BRT-AMQ-EAI-CAMEL},${BRT-AMQ-EAI-SAPPI}"/>
+		             <authorizationEntry queue="MARKETING.US.SALESFORCE.SALESDISTRICT.>" read="admin,${BRT-AMQ-EAI-SAPPI}" write="admin,${BRT-AMQ-EAI-CAMEL}" admin="admin,${BRT-AMQ-EAI-CAMEL},${BRT-AMQ-EAI-SAPPI}"/>
+		             <authorizationEntry queue="MARKETING.US.SALESFORCE.SALESDIVISION.>" read="admin,${BRT-AMQ-EAI-SAPPI}" write="admin,${BRT-AMQ-EAI-CAMEL}" admin="admin,${BRT-AMQ-EAI-CAMEL},${BRT-AMQ-EAI-SAPPI}"/>
+		             <authorizationEntry queue="MARKETING.US.SALESFORCE.SALESGROUP.>" read="admin,${BRT-AMQ-EAI-SAPPI}" write="admin,${BRT-AMQ-EAI-CAMEL}" admin="admin,${BRT-AMQ-EAI-CAMEL},${BRT-AMQ-EAI-SAPPI}"/>
+		             <authorizationEntry queue="MARKETING.US.SALESFORCE.SALESOFFICE.>" read="admin,${BRT-AMQ-EAI-SAPPI}" write="admin,${BRT-AMQ-EAI-CAMEL}" admin="admin,${BRT-AMQ-EAI-CAMEL},${BRT-AMQ-EAI-SAPPI}"/>
+		             <authorizationEntry queue="MARKETING.US.SALESFORCE.TERMINAL.>" read="admin,${BRT-AMQ-EAI-SAPPI}" write="admin,${BRT-AMQ-EAI-CAMEL}" admin="admin,${BRT-AMQ-EAI-CAMEL},${BRT-AMQ-EAI-SAPPI}"/>
+		             <authorizationEntry queue="MARKETING.US.SALESFORCE.USER.>" read="admin,${BRT-AMQ-EAI-SAPPI}" write="admin,${BRT-AMQ-EAI-CAMEL}" admin="admin,${BRT-AMQ-EAI-CAMEL},${BRT-AMQ-EAI-SAPPI}"/>
+		             <authorizationEntry queue="MARKETING.US.SALESFORCE.SITEMARKETINTELLIGENCE.>" read="admin,${BRT-AMQ-EAI-SAPPI}" write="admin,${BRT-AMQ-EAI-CAMEL}" admin="admin,${BRT-AMQ-EAI-CAMEL},${BRT-AMQ-EAI-SAPPI}"/>
+					   <authorizationEntry queue="MARKETING.DE.COMPETITORMARKETDATA.>" read="admin,${BRT-AMQ-EAI-CAMEL}" write="admin,${BRT-AMQ-EAI-CAMEL}" admin="admin,${BRT-AMQ-EAI-CAMEL}"/>
+
+		           	 <!-- Midstream Authorizations -->
+					   <authorizationEntry queue="MIDSTREAM.LOGISTICS.SCHEDULING.>" read="admin,${BRT-AMQ-EAI-SAPPI},${BRT-AMQ-EAI-CAMEL}" write="admin,${BRT-AMQ-MIDSTREAM-LOGISTICS},${BRT-AMQ-EAI-CAMEL}" admin="admin,${BRT-AMQ-MIDSTREAM-LOGISTICS},${BRT-AMQ-EAI-SAPPI},${BRT-AMQ-EAI-CAMEL}"/>
+					   <authorizationEntry queue="MIDSTREAM.LOGISTICS.MAINTENANCE.PUBLIC.>" read="admin,${BRT-AMQ-EAI-CAMEL}" write="admin,${BRT-AMQ-EAI-CAMEL}" admin="admin,${BRT-AMQ-EAI-CAMEL}"/>
+					   <authorizationEntry topic="vTopic.MIDSTREAM.LOGISTICS.NOMINATIONS.PUBLIC.>" read="admin" write="admin,${BRT-AMQ-MIDSTREAM-LOGISTICS-NOMINATIONS-PUBLIC-WRITE}" admin="admin,${BRT-AMQ-MIDSTREAM-LOGISTICS-NOMINATIONS-PUBLIC-WRITE}"/>
+					   <authorizationEntry queue="vSub.*.vTopic.MIDSTREAM.LOGISTICS.NOMINATIONS.PUBLIC.>" read="admin,${BRT-AMQ-MIDSTREAM-LOGISTICS-NOMINATIONS-PUBLIC-READ}" write="admin" admin="admin,${BRT-AMQ-MIDSTREAM-LOGISTICS-NOMINATIONS-PUBLIC-READ}"/>
+					   <authorizationEntry topic="vTopic.MIDSTREAM.LOGISTICS.NOMINATIONS.PRIVATE.>" read="admin" write="admin,${BRT-AMQ-MIDSTREAM-LOGISTICS-NOMINATIONS-PRIVATE-WRITE}" admin="admin,${BRT-AMQ-MIDSTREAM-LOGISTICS-NOMINATIONS-PRIVATE-WRITE}"/>
+					   <authorizationEntry queue="vSub.*.vTopic.MIDSTREAM.LOGISTICS.NOMINATIONS.PRIVATE.>" read="admin,${BRT-AMQ-MIDSTREAM-LOGISTICS-NOMINATIONS-PRIVATE-READ}" write="admin" admin="admin,${BRT-AMQ-MIDSTREAM-LOGISTICS-NOMINATIONS-PRIVATE-READ}"/>
+					   <authorizationEntry topic="vTopic.MIDSTREAM.LOGISTICS.SCHEDULING.PUBLIC.>" read="admin" write="admin,${BRT-AMQ-MIDSTREAM-LOGISTICS-SCHEDULING-PUBLIC-WRITE}" admin="admin,${BRT-AMQ-MIDSTREAM-LOGISTICS-SCHEDULING-PUBLIC-WRITE}"/>
+					   <authorizationEntry queue="vSub.*.vTopic.MIDSTREAM.LOGISTICS.SCHEDULING.PUBLIC.>" read="admin,${BRT-AMQ-MIDSTREAM-LOGISTICS-SCHEDULING-PUBLIC-READ}" write="admin" admin="admin,${BRT-AMQ-MIDSTREAM-LOGISTICS-SCHEDULING-PUBLIC-READ}"/>
+					   <authorizationEntry topic="vTopic.MIDSTREAM.LOGISTICS.SCHEDULING.PRIVATE.>" read="admin" write="admin,${BRT-AMQ-MIDSTREAM-LOGISTICS-SCHEDULING-PRIVATE-WRITE},${BRT-AMQ-EAI-CAMEL}" admin="admin,${BRT-AMQ-MIDSTREAM-LOGISTICS-SCHEDULING-PRIVATE-WRITE},${BRT-AMQ-EAI-CAMEL}"/>
+					   <authorizationEntry queue="vSub.*.vTopic.MIDSTREAM.LOGISTICS.SCHEDULING.PRIVATE.>" read="admin,${BRT-AMQ-MIDSTREAM-LOGISTICS-SCHEDULING-PRIVATE-READ}" write="admin" admin="admin,${BRT-AMQ-MIDSTREAM-LOGISTICS-SCHEDULING-PRIVATE-READ}"/>
+					   <authorizationEntry topic="vTopic.MIDSTREAM.ASSETS.PUBLIC.>" read="admin" write="admin,${BRT-AMQ-MIDSTREAM-ASSETS-PUBLIC-WRITE}" admin="admin,${BRT-AMQ-MIDSTREAM-ASSETS-PUBLIC-WRITE}"/>
+					   <authorizationEntry queue="vSub.*.vTopic.MIDSTREAM.ASSETS.PUBLIC.>" read="admin,${BRT-AMQ-MIDSTREAM-ASSETS-PUBLIC-READ}" write="admin" admin="admin,${BRT-AMQ-MIDSTREAM-ASSETS-PUBLIC-READ}"/>
+					   <authorizationEntry topic="vTopic.MIDSTREAM.ASSETS.PRIVATE.>" read="admin" write="admin,${BRT-AMQ-MIDSTREAM-ASSETS-PRIVATE-WRITE}" admin="admin,${BRT-AMQ-MIDSTREAM-ASSETS-PRIVATE-WRITE}"/>
+					   <authorizationEntry queue="vSub.*.vTopic.MIDSTREAM.ASSETS.PRIVATE.>" read="admin,${BRT-AMQ-MIDSTREAM-ASSETS-PRIVATE-READ}" write="admin" admin="admin,${BRT-AMQ-MIDSTREAM-ASSETS-PRIVATE-READ}"/>
+					   <authorizationEntry topic="vTopic.MIDSTREAM.COMMODITIES.PUBLIC.>" read="admin" write="admin,${BRT-AMQ-MIDSTREAM-COMMODITIES-PUBLIC-WRITE}" admin="admin,${BRT-AMQ-MIDSTREAM-COMMODITIES-PUBLIC-WRITE}"/>
+					   <authorizationEntry queue="vSub.*.vTopic.MIDSTREAM.COMMODITIES.PUBLIC.>" read="admin,${BRT-AMQ-MIDSTREAM-COMMODITIES-PUBLIC-READ}" write="admin" admin="admin,${BRT-AMQ-MIDSTREAM-COMMODITIES-PUBLIC-READ}"/>
+					   <authorizationEntry topic="vTopic.MIDSTREAM.COMMODITIES.PRIVATE.>" read="admin" write="admin,${BRT-AMQ-MIDSTREAM-COMMODITIES-PRIVATE-WRITE}" admin="admin,${BRT-AMQ-MIDSTREAM-COMMODITIES-PRIVATE-WRITE}"/>
+					   <authorizationEntry queue="vSub.*.vTopic.MIDSTREAM.COMMODITIES.PRIVATE.>" read="admin,${BRT-AMQ-MIDSTREAM-COMMODITIES-PRIVATE-READ}" write="admin" admin="admin,${BRT-AMQ-MIDSTREAM-COMMODITIES-PRIVATE-READ}"/>
+					   <authorizationEntry topic="vTopic.MIDSTREAM.COMPANIES.PUBLIC.>" read="admin" write="admin,${BRT-AMQ-MIDSTREAM-COMPANIES-PUBLIC-WRITE}" admin="admin,${BRT-AMQ-MIDSTREAM-COMPANIES-PUBLIC-WRITE}"/>
+					   <authorizationEntry queue="vSub.*.vTopic.MIDSTREAM.COMPANIES.PUBLIC.>" read="admin,${BRT-AMQ-MIDSTREAM-COMPANIES-PUBLIC-READ}" write="admin" admin="admin,${BRT-AMQ-MIDSTREAM-COMPANIES-PUBLIC-READ}"/>
+					   <authorizationEntry topic="vTopic.MIDSTREAM.COMPANIES.PRIVATE.>" read="admin" write="admin,${BRT-AMQ-MIDSTREAM-COMPANIES-PRIVATE-WRITE}" admin="admin,${BRT-AMQ-MIDSTREAM-COMPANIES-PRIVATE-WRITE}"/>
+					   <authorizationEntry queue="vSub.*.vTopic.MIDSTREAM.COMPANIES.PRIVATE.>" read="admin,${BRT-AMQ-MIDSTREAM-COMPANIES-PRIVATE-READ}" write="admin" admin="admin,${BRT-AMQ-MIDSTREAM-COMPANIES-PRIVATE-READ}"/>
+					   <authorizationEntry topic="vTopic.MIDSTREAM.LOGISTICS.MAINTENANCE.PUBLIC.>" read="admin" write="admin,${BRT-AMQ-EAI-CAMEL}" admin="admin,${BRT-AMQ-EAI-CAMEL}"/>
+					   <authorizationEntry queue="vSub.*.vTopic.MIDSTREAM.LOGISTICS.MAINTENANCE.PUBLIC.>" read="admin,${BRT-AMQ-EAI-CAMEL}" write="admin" admin="admin,${BRT-AMQ-EAI-CAMEL}"/>
+					   <authorizationEntry topic="vTopic.MIDSTREAM.INVENTORY.PUBLIC.>" read="admin" write="admin,${BRT-AMQ-MIDSTREAM-INVENTORY-PUBLIC-WRITE}" admin="admin,${BRT-AMQ-MIDSTREAM-INVENTORY-PUBLIC-WRITE}"/>
+					   <authorizationEntry queue="vSub.*.vTopic.MIDSTREAM.INVENTORY.PUBLIC.>" read="admin,${BRT-AMQ-MIDSTREAM-INVENTORY-PUBLIC-READ}" write="admin" admin="admin,${BRT-AMQ-MIDSTREAM-INVENTORY-PUBLIC-READ}"/>
+					   <authorizationEntry topic="vTopic.MIDSTREAM.INVENTORY.PRIVATE.>" read="admin" write="admin,${BRT-AMQ-MIDSTREAM-INVENTORY-PRIVATE-WRITE}" admin="admin,${BRT-AMQ-MIDSTREAM-INVENTORY-PRIVATE-WRITE}"/>
+					   <authorizationEntry queue="vSub.*.vTopic.MIDSTREAM.INVENTORY.PRIVATE.>" read="admin,${BRT-AMQ-MIDSTREAM-INVENTORY-PRIVATE-READ}" write="admin" admin="admin,${BRT-AMQ-MIDSTREAM-INVENTORY-PRIVATE-READ}"/>
+					   <authorizationEntry topic="vTopic.MIDSTREAM.TICKETS.PUBLIC.>" read="admin" write="admin,${BRT-AMQ-MIDSTREAM-TICKETS-PUBLIC-WRITE}" admin="admin,${BRT-AMQ-MIDSTREAM-TICKETS-PUBLIC-WRITE}"/>
+					   <authorizationEntry queue="vSub.*.vTopic.MIDSTREAM.TICKETS.PUBLIC.>" read="admin,${BRT-AMQ-MIDSTREAM-TICKETS-PUBLIC-READ}" write="admin" admin="admin,${BRT-AMQ-MIDSTREAM-TICKETS-PUBLIC-READ}"/>
+					   <authorizationEntry topic="vTopic.MIDSTREAM.TICKETS.PRIVATE.>" read="admin" write="admin,${BRT-AMQ-MIDSTREAM-TICKETS-PRIVATE-WRITE}" admin="admin,${BRT-AMQ-MIDSTREAM-TICKETS-PRIVATE-WRITE}"/>
+					   <authorizationEntry queue="vSub.*.vTopic.MIDSTREAM.TICKETS.PRIVATE.>" read="admin,${BRT-AMQ-MIDSTREAM-TICKETS-PRIVATE-READ}" write="admin" admin="admin,${BRT-AMQ-MIDSTREAM-TICKETS-PRIVATE-READ}"/>
+
+					   <!-- EAI Authorizations -->
+					   <authorizationEntry queue="EAI.INTERNAL.>" read="admin,Deployer,${BRT-AMQ-EAI-CAMEL}" write="admin,Deployer,${BRT-AMQ-EAI-CAMEL}" admin="admin,Deployer,${BRT-AMQ-EAI-CAMEL}"/>
+					   <authorizationEntry topic="vTopic.EAI.INTERNAL.>" read="admin" write="admin,Deployer,${BRT-AMQ-EAI-CAMEL}" admin="admin,Deployer,${BRT-AMQ-EAI-CAMEL}"/>
+					   <authorizationEntry queue="vSub.*.vTopic.EAI.INTERNAL.>" read="admin,Deployer,${BRT-AMQ-EAI-CAMEL}" write="admin" admin="admin,Deployer,${BRT-AMQ-EAI-CAMEL}"/>
+
+					   <!-- Advisory Authorizations -->
+		             <authorizationEntry topic="ActiveMQ.Advisory.>"
+		             		read="admin,Deployer,${BRT-AMQ-EAI-SAPPI},${BRT-AMQ-EAI-CAMEL},${HST-AMQ-COMMERCIAL-RA},${BRT-AMQ-EAI-INFORMATICA},${HST-AMQ-COMMERCIAL-CDW},${HST-AMQ-COMMERCIAL-PFMS},${HST-AMQ-COMMERCIAL-LIM},${HST-AMQ-COMMERCIAL-ALIGNE},${BRT-AMQ-COMMERCIAL-IMOS-VENDORCREDITRESPONSE},${BRT-AMQ-COMMERCIAL-MARR},${BRT-AMQ-COMMERCIAL-IMOS-VENDORCREDITREQUEST},${BRT-AMQ-COMMERCIAL-IMOS-MARR},${BRT-AMQ-EAI-SI},${BRT-AMQ-MIDSTREAM-LOGISTICS},${BRT-AMQ-MIDSTREAM-LOGISTICS-NOMINATIONS-PUBLIC-WRITE},${BRT-AMQ-MIDSTREAM-LOGISTICS-NOMINATIONS-PUBLIC-READ},${BRT-AMQ-MIDSTREAM-LOGISTICS-NOMINATIONS-PRIVATE-WRITE},${BRT-AMQ-MIDSTREAM-LOGISTICS-NOMINATIONS-PRIVATE-READ},${BRT-AMQ-MIDSTREAM-LOGISTICS-SCHEDULING-PUBLIC-WRITE},${BRT-AMQ-MIDSTREAM-LOGISTICS-SCHEDULING-PUBLIC-READ},${BRT-AMQ-MIDSTREAM-LOGISTICS-SCHEDULING-PRIVATE-WRITE},${BRT-AMQ-MIDSTREAM-LOGISTICS-SCHEDULING-PRIVATE-READ},${BRT-AMQ-MIDSTREAM-ASSETS-PUBLIC-WRITE},${BRT-AMQ-MIDSTREAM-ASSETS-PUBLIC-READ},${BRT-AMQ-MIDSTREAM-ASSETS-PRIVATE-WRITE},${BRT-AMQ-MIDSTREAM-ASSETS-PRIVATE-READ},${BRT-AMQ-MIDSTREAM-COMMODITIES-PUBLIC-WRITE},${BRT-AMQ-MIDSTREAM-COMMODITIES-PUBLIC-READ},${BRT-AMQ-MIDSTREAM-COMMODITIES-PRIVATE-WRITE},${BRT-AMQ-MIDSTREAM-COMMODITIES-PRIVATE-READ},${BRT-AMQ-MIDSTREAM-COMPANIES-PUBLIC-WRITE},${BRT-AMQ-MIDSTREAM-COMPANIES-PUBLIC-READ},${BRT-AMQ-MIDSTREAM-COMPANIES-PRIVATE-WRITE},${BRT-AMQ-MIDSTREAM-COMPANIES-PRIVATE-READ},${BRT-AMQ-MIDSTREAM-INVENTORY-PUBLIC-WRITE},${BRT-AMQ-MIDSTREAM-INVENTORY-PUBLIC-READ},${BRT-AMQ-MIDSTREAM-INVENTORY-PRIVATE-WRITE},${BRT-AMQ-MIDSTREAM-INVENTORY-PRIVATE-READ},${BRT-AMQ-MIDSTREAM-TICKETS-PUBLIC-WRITE},${BRT-AMQ-MIDSTREAM-TICKETS-PUBLIC-READ},${BRT-AMQ-MIDSTREAM-TICKETS-PRIVATE-WRITE},${BRT-AMQ-MIDSTREAM-TICKETS-PRIVATE-READ}"
+		             		write="admin,Deployer,${BRT-AMQ-EAI-SAPPI},${BRT-AMQ-EAI-CAMEL},${HST-AMQ-COMMERCIAL-RA},${BRT-AMQ-EAI-INFORMATICA},${HST-AMQ-COMMERCIAL-CDW},${HST-AMQ-COMMERCIAL-PFMS},${HST-AMQ-COMMERCIAL-LIM},${HST-AMQ-COMMERCIAL-ALIGNE},${BRT-AMQ-COMMERCIAL-IMOS-VENDORCREDITRESPONSE},${BRT-AMQ-COMMERCIAL-MARR},${BRT-AMQ-COMMERCIAL-IMOS-VENDORCREDITREQUEST},${BRT-AMQ-COMMERCIAL-IMOS-MARR},${BRT-AMQ-EAI-SI},${BRT-AMQ-MIDSTREAM-LOGISTICS},${BRT-AMQ-MIDSTREAM-LOGISTICS-NOMINATIONS-PUBLIC-WRITE},${BRT-AMQ-MIDSTREAM-LOGISTICS-NOMINATIONS-PUBLIC-READ},${BRT-AMQ-MIDSTREAM-LOGISTICS-NOMINATIONS-PRIVATE-WRITE},${BRT-AMQ-MIDSTREAM-LOGISTICS-NOMINATIONS-PRIVATE-READ},${BRT-AMQ-MIDSTREAM-LOGISTICS-SCHEDULING-PUBLIC-WRITE},${BRT-AMQ-MIDSTREAM-LOGISTICS-SCHEDULING-PUBLIC-READ},${BRT-AMQ-MIDSTREAM-LOGISTICS-SCHEDULING-PRIVATE-WRITE},${BRT-AMQ-MIDSTREAM-LOGISTICS-SCHEDULING-PRIVATE-READ},${BRT-AMQ-MIDSTREAM-ASSETS-PUBLIC-WRITE},${BRT-AMQ-MIDSTREAM-ASSETS-PUBLIC-READ},${BRT-AMQ-MIDSTREAM-ASSETS-PRIVATE-WRITE},${BRT-AMQ-MIDSTREAM-ASSETS-PRIVATE-READ},${BRT-AMQ-MIDSTREAM-COMMODITIES-PUBLIC-WRITE},${BRT-AMQ-MIDSTREAM-COMMODITIES-PUBLIC-READ},${BRT-AMQ-MIDSTREAM-COMMODITIES-PRIVATE-WRITE},${BRT-AMQ-MIDSTREAM-COMMODITIES-PRIVATE-READ},${BRT-AMQ-MIDSTREAM-COMPANIES-PUBLIC-WRITE},${BRT-AMQ-MIDSTREAM-COMPANIES-PUBLIC-READ},${BRT-AMQ-MIDSTREAM-COMPANIES-PRIVATE-WRITE},${BRT-AMQ-MIDSTREAM-COMPANIES-PRIVATE-READ},${BRT-AMQ-MIDSTREAM-INVENTORY-PUBLIC-WRITE},${BRT-AMQ-MIDSTREAM-INVENTORY-PUBLIC-READ},${BRT-AMQ-MIDSTREAM-INVENTORY-PRIVATE-WRITE},${BRT-AMQ-MIDSTREAM-INVENTORY-PRIVATE-READ},${BRT-AMQ-MIDSTREAM-TICKETS-PUBLIC-WRITE},${BRT-AMQ-MIDSTREAM-TICKETS-PUBLIC-READ},${BRT-AMQ-MIDSTREAM-TICKETS-PRIVATE-WRITE},${BRT-AMQ-MIDSTREAM-TICKETS-PRIVATE-READ}"
+		             		admin="admin,Deployer,${BRT-AMQ-EAI-SAPPI},${BRT-AMQ-EAI-CAMEL},${HST-AMQ-COMMERCIAL-RA},${BRT-AMQ-EAI-INFORMATICA},${HST-AMQ-COMMERCIAL-CDW},${HST-AMQ-COMMERCIAL-PFMS},${HST-AMQ-COMMERCIAL-LIM},${HST-AMQ-COMMERCIAL-ALIGNE},${BRT-AMQ-COMMERCIAL-IMOS-VENDORCREDITRESPONSE},${BRT-AMQ-COMMERCIAL-MARR},${BRT-AMQ-COMMERCIAL-IMOS-VENDORCREDITREQUEST},${BRT-AMQ-COMMERCIAL-IMOS-MARR},${BRT-AMQ-EAI-SI},${BRT-AMQ-MIDSTREAM-LOGISTICS},${BRT-AMQ-MIDSTREAM-LOGISTICS-NOMINATIONS-PUBLIC-WRITE},${BRT-AMQ-MIDSTREAM-LOGISTICS-NOMINATIONS-PUBLIC-READ},${BRT-AMQ-MIDSTREAM-LOGISTICS-NOMINATIONS-PRIVATE-WRITE},${BRT-AMQ-MIDSTREAM-LOGISTICS-NOMINATIONS-PRIVATE-READ},${BRT-AMQ-MIDSTREAM-LOGISTICS-SCHEDULING-PUBLIC-WRITE},${BRT-AMQ-MIDSTREAM-LOGISTICS-SCHEDULING-PUBLIC-READ},${BRT-AMQ-MIDSTREAM-LOGISTICS-SCHEDULING-PRIVATE-WRITE},${BRT-AMQ-MIDSTREAM-LOGISTICS-SCHEDULING-PRIVATE-READ},${BRT-AMQ-MIDSTREAM-ASSETS-PUBLIC-WRITE},${BRT-AMQ-MIDSTREAM-ASSETS-PUBLIC-READ},${BRT-AMQ-MIDSTREAM-ASSETS-PRIVATE-WRITE},${BRT-AMQ-MIDSTREAM-ASSETS-PRIVATE-READ},${BRT-AMQ-MIDSTREAM-COMMODITIES-PUBLIC-WRITE},${BRT-AMQ-MIDSTREAM-COMMODITIES-PUBLIC-READ},${BRT-AMQ-MIDSTREAM-COMMODITIES-PRIVATE-WRITE},${BRT-AMQ-MIDSTREAM-COMMODITIES-PRIVATE-READ},${BRT-AMQ-MIDSTREAM-COMPANIES-PUBLIC-WRITE},${BRT-AMQ-MIDSTREAM-COMPANIES-PUBLIC-READ},${BRT-AMQ-MIDSTREAM-COMPANIES-PRIVATE-WRITE},${BRT-AMQ-MIDSTREAM-COMPANIES-PRIVATE-READ},${BRT-AMQ-MIDSTREAM-INVENTORY-PUBLIC-WRITE},${BRT-AMQ-MIDSTREAM-INVENTORY-PUBLIC-READ},${BRT-AMQ-MIDSTREAM-INVENTORY-PRIVATE-WRITE},${BRT-AMQ-MIDSTREAM-INVENTORY-PRIVATE-READ},${BRT-AMQ-MIDSTREAM-TICKETS-PUBLIC-WRITE},${BRT-AMQ-MIDSTREAM-TICKETS-PUBLIC-READ},${BRT-AMQ-MIDSTREAM-TICKETS-PRIVATE-WRITE},${BRT-AMQ-MIDSTREAM-TICKETS-PRIVATE-READ}"/>
+
+		           </authorizationEntries>
+		           <tempDestinationAuthorizationEntry>
+		             <tempDestinationAuthorizationEntry read="admin" write="admin" admin="admin"/>
+		           </tempDestinationAuthorizationEntry>
+		        </authorizationMap>
+		      </map>
+   			</authorizationPlugin>
+            <loggingBrokerPlugin logAll="false" logConnectionEvents="true" logConsumerEvents="false"/>
+        </plugins>
+
+        <!--
+            The systemUsage controls the maximum amount of space the broker will
+            use before disabling caching and/or slowing down producers.
+            For more information, see:
+
+            http://activemq.apache.org/producer-flow-control.html
+        -->
+        <systemUsage>
+            <systemUsage>
+                <memoryUsage>
+                    <memoryUsage percentOfJvmHeap="70" />
+                </memoryUsage>
+                <storeUsage>
+                    <storeUsage limit="##### STORE_USAGE #####" />
+                </storeUsage>
+                <tempUsage>
+                    <tempUsage limit="50 gb" />
+                </tempUsage>
+            </systemUsage>
+        </systemUsage>
+
+        <!--
+            The transport connectors expose ActiveMQ over a given protocol to
+            clients and other brokers. For more information, see:
+
+            http://activemq.apache.org/configuring-transports.html
+        -->
+        <!-- ##### TRANSPORT_CONNECTORS ##### -->
+
+        <!-- ##### SSL_CONTEXT ##### -->
+
+        <!-- destroy the spring context on shutdown to stop jetty -->
+        <shutdownHooks>
+            <bean xmlns="http://www.springframework.org/schema/beans" class="org.apache.activemq.hooks.SpringContextHook" />
+        </shutdownHooks>
+
+    </broker>
+
+    <!--
+        Enable web consoles, REST and Ajax APIs and demos
+        The web consoles requires by default login, you can disable this in the jetty.xml file
+
+        Take a look at ${ACTIVEMQ_HOME}/conf/jetty.xml for more details
+    -->
+    <!-- Do not expose the console or other webapps
+    <import resource="jetty.xml" />
+    -->
+
+</beans>

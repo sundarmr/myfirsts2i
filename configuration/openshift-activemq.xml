@@ -156,25 +156,18 @@
             <jaasAuthenticationPlugin configuration="ldapConfiguration" />
              <authorizationPlugin>
 		       <map>
-		         <authorizationMap groupClass="org.apache.activemq.jaas.GroupPrincipal">
+		         <authorizationMap groupClass="org.apache.karaf.jaas.boot.principal.RolePrincipal">
 		           <authorizationEntries>
-
-		           	 <!-- Global Authorizations -->
-		           	 <authorizationEntry queue=">" read="admin" write="admin" admin="admin"/>
-		           	 <authorizationEntry topic=">" read="admin" write="admin" admin="admin"/>
-		             <!-- P66 QUEUE based Authorizations -->
-		             <!-- Commerical Right Angle Authorizations -->
-				   <authorizationEntry queue="COMMERCIAL.RA.ARBALANCES.>" read="admin,${HST-AMQ-COMMERCIAL-RA}" write="admin,${BRT-AMQ-EAI-SAPPI}," admin="admin,${BRT-AMQ-EAI-SAPPI},${HST-AMQ-COMMERCIAL-RA}"/>
-	   <!-- Advisory Authorizations -->
-		             <authorizationEntry topic="ActiveMQ.Advisory.>"
-		             		read="admin,Deployer,users" write="admin,Deployer,users" admin="admin,Deployer,users" />
-		           </authorizationEntries>
+		           	 <authorizationEntry queue=">" read="admin,users" write="admin,users" admin="admin,users"/>
+		           	 <authorizationEntry topic=">" read="admin,users" write="admin,users" admin="admin,users"/>
+		            	 <authorizationEntry topic="ActiveMQ.Advisory.>" read="guests,users" write="guests,users" admin="guests,users"/>
+			   </authorizationEntries>
 		           <tempDestinationAuthorizationEntry>
 		             <tempDestinationAuthorizationEntry read="admin" write="admin" admin="admin"/>
 		           </tempDestinationAuthorizationEntry>
 		        </authorizationMap>
 		      </map>
-   			</authorizationPlugin>
+   	     </authorizationPlugin>
             <loggingBrokerPlugin logAll="false" logConnectionEvents="true" logConsumerEvents="false"/>
         </plugins>
 

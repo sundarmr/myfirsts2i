@@ -154,7 +154,7 @@
 
         <plugins>
             <jaasAuthenticationPlugin configuration="ldapConfiguration" />
-             <authorizationPlugin>
+           <!--  <authorizationPlugin>
 		       <map>
 		         <authorizationMap groupClass="org.apache.karaf.jaas.boot.principal.RolePrincipal">
 		           <authorizationEntries>
@@ -167,7 +167,7 @@
 		           </tempDestinationAuthorizationEntry>
 		        </authorizationMap>
 		      </map>
-   	     </authorizationPlugin>
+   	     </authorizationPlugin> -->
             <loggingBrokerPlugin logAll="false" logConnectionEvents="true" logConsumerEvents="false"/>
         </plugins>
 

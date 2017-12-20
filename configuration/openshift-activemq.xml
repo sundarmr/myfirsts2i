@@ -156,7 +156,7 @@
             <jaasAuthenticationPlugin configuration="ldapConfiguration" />
              <authorizationPlugin>
 		       <map>
-		         <authorizationMap groupClass="org.apache.karaf.jaas.boot.principal.RolePrincipal">
+		         <authorizationMap groupClass="org.apache.activemq.jaas.GroupPrincipal">
 		           <authorizationEntries>
 		           	 <authorizationEntry queue=">" read="admin,users" write="admin,users" admin="admin,users"/>
 		           	 <authorizationEntry topic=">" read="admin,users" write="admin,users" admin="admin,users"/>
